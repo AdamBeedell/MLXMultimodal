@@ -5,18 +5,18 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "notebook>=7.4.4",
-    "torch>=2.7.1",
-    "datasets>=3.6.0",
-    "kaggle>=1.7.4.5",
-    "kagglehub>=0.3.12",
-    "matplotlib>=3.10.3",
-    "numpy>=2.3.1",
-    "pandas>=2.3.0",
-    "torch>=2.7.1",
-    "wandb>=0.20.1",
- "torchvision>=0.22.1",
- "transformers>=4.53.0",
+  "notebook>=7.4.4",
+  "torch>=2.7.1",
+  "datasets>=3.6.0",
+  "kaggle>=1.7.4.5",
+  "kagglehub>=0.3.12",
+  "matplotlib>=3.10.3",
+  "numpy>=2.3.1",
+  "pandas>=2.3.0",
+  "torch>=2.7.1",
+  "wandb>=0.20.1",
+  "torchvision>=0.22.1",
+  "transformers>=4.53.0",
 ]
 
 # see https://docs.astral.sh/uv/concepts/projects/workspaces/

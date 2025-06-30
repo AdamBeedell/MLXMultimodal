@@ -4,4 +4,4 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["torch>=2.7.1", "torchvision>=0.22.1"]
+dependencies = ["torch>=2.7.1", "torchvision>=0.22.1", "transformers>=4.53.0"]

@@ -2,6 +2,8 @@
 
 > by the Perceptron Party crew
 
+Relevant Cortex entry: [Multimodal transformers and image captioning](https://cortex.mlx.institute/m/188)
+
 
 ## The task at hand
 

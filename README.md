@@ -18,7 +18,7 @@
 
 > [Learning Transferable Visual Models From Natural Language Supervision](https://arxiv.org/abs/2103.00020) (2021)
 
-> **freemvmt's tl;dr:** CLIP is _not_ a classifier in the typical sense. It doesn't sort images into classes/buckets. And yet, we can _use_ a CLIP model to do classification after the fact. This is the 'transferable' quality named in the paper title, where we can apply our very _general_ text-image architecture for the specific task of zero-shot classification.
+**freemvmt's tl;dr:** CLIP is _not_ a classifier in the typical sense. It doesn't sort images into classes/buckets. And yet, we can _use_ a CLIP model to do classification after the fact. This is the 'transferable' quality named in the paper title, in that we can apply our very _general_ text-image architecture for the _specific_ task of zero-shot classification (i.e. categorising an unseen image).
 
 Figure 1 in the paper provides a useful diagrammatic overview:
 

@@ -1,6 +1,7 @@
-def main():
-    print("Hello from freemvmt!")
+from transformers import CLIPModel, ViTModel
 
+c = CLIPModel.from_pretrained("openai/clip-vit-base-patch16")
+v = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
 
-if __name__ == "__main__":
-    main()
+print("CLIP:", c)
+print("ViTL", v)

@@ -8,14 +8,16 @@ import os
 
 # 1. Load the Flickr30k dataset from Hugging Face
 ds = load_dataset("nlphuji/flickr30k")
+# try to check the number of samples in train/val/test
+from collections import Counter
+split_counts = Counter(ds['test']['split'])
+print(split_counts)  # train/val/test: 29000/1014/1000
 
-# 2. Split the dataset into train:val:test = 8:1:1
-# We'll use the 'train' split and split it further
-split_ds = ds['train'].train_test_split(test_size=0.2, seed=42)
-train_val = split_ds['train'].train_test_split(test_size=0.1111, seed=42)  # 0.1111*0.8 ≈ 0.0888
-train_ds = train_val['train']
-val_ds = train_val['test']
-test_ds = split_ds['test']
+# 2. Split the dataset into train:val:test according to the pre-defined column of 'split' in the huggingface dataset
+train_ds = ds['test'].filter(lambda d: d['split']=='train')
+val_ds = ds['test'].filter(lambda d: d['split']=='val')
+test_ds = ds['test'].filter(lambda d: d['split']=='test')
+
 
 # 3. Load CLIP's vision encoder and processor
 clip_model = CLIPModel.from_pretrained('openai/clip-vit-base-patch32')

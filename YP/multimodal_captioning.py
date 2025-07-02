@@ -93,11 +93,11 @@ class MultimodalCaptionModel(nn.Module):
         inputs_embeds = self.decoder.embed_tokens(input_ids)
         # Prepend vision_embeds to the sequence
         vision_embeds = vision_embeds.unsqueeze(1)  # (batch, 1, embed_dim)
-        inputs_embeds = torch.cat([vision_embeds, inputs_embeds], dim=1)
-        # Adjust attention mask
+        inputs_embeds = torch.cat([vision_embeds, inputs_embeds], dim=1) # the vision feature (CLS token) is prepended to the text embeddings
+        # Adjust attention mask; the mask will tell the transformer which tokens are actual data and which are just paddings(to be ignored)
         if attention_mask is not None:
             vision_mask = torch.ones((attention_mask.shape[0], 1), dtype=attention_mask.dtype, device=attention_mask.device)
-            attention_mask = torch.cat([vision_mask, attention_mask], dim=1)
+            attention_mask = torch.cat([vision_mask, attention_mask], dim=1) # vision feature is prepended to text feature
         # Forward through decoder
         outputs = self.decoder(inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels)
         return outputs
@@ -110,9 +110,10 @@ def preprocess(example):
     processed = clip_processor(images=image, return_tensors="pt")
     pixel_values = processed['pixel_values'][0]
     # Preprocess text
-    caption = example['sentence']
+    caption = example['caption']
+    # tokenizer returns a dict with keys like 'input_ids','attention_mask' etc
     tokens = tokenizer(caption, padding='max_length', truncation=True, max_length=32, return_tensors='pt')
-    input_ids = tokens['input_ids'][0]
+    input_ids = tokens['input_ids'][0] # input_ids is a tensor of shape (1,max_length), so [0] extract the first and only sequence
     attention_mask = tokens['attention_mask'][0]
     labels = input_ids.clone()
     return {

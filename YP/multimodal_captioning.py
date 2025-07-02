@@ -25,7 +25,7 @@ def flatten_dataset(batch):
     filenames = []
     for img,caps,spl,sids,img_id,fname in tqdm(zip(
         batch['image'], batch['caption'], batch['split'], batch['sentids'], batch['img_id'], batch['filename']
-        )):  # iterates over each row/image
+        )):                            # iterates over each row/image
         for cap,sid in zip(caps,sids): # iterates over each caption; 5 captions for each image
             images.append(img)
             captions.append(cap)
@@ -52,7 +52,7 @@ clip_model = CLIPModel.from_pretrained('openai/clip-vit-base-patch32') # the neu
 # CLIP is essentially a two-tower mnultimodal encoder, has no decoder, to compare the similarity (contrastive learning) between the image and text representations
 # # to see what's inside of the model
 # print(vision_encoder)
-clip_processor = CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32', use_fast=True) # the pre-processing methods for images and text
+clip_processor = CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32', use_fast=True) # the pre-processing methods for images and text, here we only use it to pre-process images
 vision_encoder = clip_model.vision_model
 for param in vision_encoder.parameters():
     param.requires_grad = False  # freeze vision encoder
@@ -60,23 +60,16 @@ for param in vision_encoder.parameters():
 
 # 4. Load QWen's decoder and tokenizer
 qwen_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base") # QWen is a generative model, same as GPT, so it only has decoder no encoder, the entire model is a decoder
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base") # to tokenize the captions/text
 decoder = qwen_model.model
 for param in decoder.parameters():
     param.requires_grad = True  # train decoder
 
 
 # 5. Define a projection layer to map vision features to decoder input; make sure encoder output and decoder input are in the same space before glue them together 
-def get_vision_feature_dim():
-    dummy = torch.zeros(1, 3, 224, 224)
-    with torch.no_grad():
-        features = vision_encoder(dummy)
-    return features[0].shape[-1] # get the last dimension: the size of the feature space
-
-vision_feature_dim = get_vision_feature_dim()
+vision_feature_dim = vision_encoder.config.hidden_size
 decoder_embed_dim = decoder.embed_tokens.embedding_dim
-
-
+### build the architecture
 class MultimodalCaptionModel(nn.Module):
     # define the architecture of this neural net, sets up the layers and parameters
     def __init__(self, vision_encoder, decoder, vision_feature_dim, decoder_embed_dim):
@@ -100,7 +93,7 @@ class MultimodalCaptionModel(nn.Module):
         # Adjust attention mask; the mask will tell the transformer which tokens are actual data and which are just paddings(to be ignored)
         if attention_mask is not None:
             vision_mask = torch.ones((attention_mask.shape[0], 1), dtype=attention_mask.dtype, device=attention_mask.device)
-            attention_mask = torch.cat([vision_mask, attention_mask], dim=1) # vision feature is prepended to text feature
+            attention_mask = torch.cat([vision_mask, attention_mask], dim=1) # vision feature is prepended to text feature, same for its mask
         # Forward through decoder
         outputs = self.decoder(inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels)
         # Here, the model uses the labels argument, and the causal mask is applied internally by the model.
@@ -120,7 +113,7 @@ def preprocess(example):
     # tokenizer returns a dict with keys like 'input_ids','attention_mask' etc
     tokens = tokenizer(caption, padding='max_length', truncation=True, max_length=32, return_tensors='pt')
     input_ids = tokens['input_ids'][0] # input_ids is a tensor of shape (1,max_length), so [0] extract the first and only sequence
-    attention_mask = tokens['attention_mask'][0]
+    attention_mask = tokens['attention_mask'][0] # here attention means actual tokens or not
     labels = input_ids.clone()
     return {
         'pixel_values': pixel_values,

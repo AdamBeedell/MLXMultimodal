@@ -138,6 +138,7 @@ test_ds = test_ds.map(preprocess)
 
 # 8. DataLoader
 batch_size = 8
+# convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     return {
         'pixel_values': torch.stack([x['pixel_values'] for x in batch]),
@@ -145,7 +146,9 @@ def collate_fn(batch):
         'attention_mask': torch.stack([x['attention_mask'] for x in batch]),
         'labels': torch.stack([x['labels'] for x in batch]),
     }
+# shuffle samples for training to aviod model learn the order of samples, which is useless
 train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# not shuffle samples to ensure the same validation dataset for each epoch, to make the comparison between epochs fair
 val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -162,12 +165,12 @@ best_val_loss = float('inf')
 cider_metric = evaluate.load('cider')
 bleu_metric = evaluate.load('bleu')
 
-for epoch in range(num_epochs):
+for epoch in range(num_epochs): # iterates over epochs
     # Training
     model.train()
     train_loss = 0.0
-    for batch in tqdm(train_loader, desc=f'Training Epoch {epoch+1}'):
-        for k in batch:
+    for batch in tqdm(train_loader, desc=f'Training Epoch {epoch+1}'): # iterates over batches
+        for k in batch: # iterates over keys in each batch dict, to convert them to(device)
             batch[k] = batch[k].to(device)
         outputs = model(**batch) # ** is unpacking operator for dict, passing each key-value pair as a named argument to the function (that's why you didn't see the explicit input) 
         loss = outputs.loss

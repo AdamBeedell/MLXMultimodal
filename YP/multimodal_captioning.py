@@ -25,8 +25,8 @@ def flatten_dataset(batch):
     filenames = []
     for img,caps,spl,sids,img_id,fname in tqdm(zip(
         batch['image'], batch['caption'], batch['split'], batch['sentids'], batch['img_id'], batch['filename']
-        )):
-        for cap,sid in zip(caps,sids):
+        )):  # iterates over each row/image
+        for cap,sid in zip(caps,sids): # iterates over each caption; 5 captions for each image
             images.append(img)
             captions.append(cap)
             splits.append(spl)
@@ -131,13 +131,18 @@ def preprocess(example):
 
 
 # 7. Apply preprocessing to datasets
-train_ds = train_ds.map(preprocess)
-val_ds = val_ds.map(preprocess)
-test_ds = test_ds.map(preprocess)
+# train_ds = train_ds.map(preprocess)
+# val_ds = val_ds.map(preprocess)
+# test_ds = test_ds.map(preprocess)
+
+### reduce size
+train_ds = train_ds.select(range(14500)).map(preprocess)
+val_ds = val_ds.select(range(507)).map(preprocess)
+test_ds = test_ds.select(range(500)).map(preprocess)
 
 
 # 8. DataLoader
-batch_size = 8
+batch_size = 16
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     return {

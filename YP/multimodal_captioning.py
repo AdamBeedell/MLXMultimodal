@@ -5,6 +5,7 @@ from datasets import load_dataset
 from transformers import CLIPProcessor, CLIPModel, AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import os
+import evaluate 
 
 
 # 1. Load the Flickr30k dataset from Hugging Face
@@ -51,7 +52,7 @@ clip_model = CLIPModel.from_pretrained('openai/clip-vit-base-patch32') # the neu
 # CLIP is essentially a two-tower mnultimodal encoder, has no decoder, to compare the similarity (contrastive learning) between the image and text representations
 # # to see what's inside of the model
 # print(vision_encoder)
-clip_processor = CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32') # the pre-processing methods for images and text
+clip_processor = CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32', use_fast=True) # the pre-processing methods for images and text
 vision_encoder = clip_model.vision_model
 for param in vision_encoder.parameters():
     param.requires_grad = False  # freeze vision encoder
@@ -102,6 +103,7 @@ class MultimodalCaptionModel(nn.Module):
             attention_mask = torch.cat([vision_mask, attention_mask], dim=1) # vision feature is prepended to text feature
         # Forward through decoder
         outputs = self.decoder(inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels)
+        # Here, the model uses the labels argument, and the causal mask is applied internally by the model.
         return outputs
 
 
@@ -156,6 +158,9 @@ num_epochs = 5  # You can increase this for better results
 save_path = 'multimodal_caption_model.pt'
 
 best_val_loss = float('inf')
+# using more metrics
+cider_metric = evaluate.load('cider')
+bleu_metric = evaluate.load('bleu')
 
 for epoch in range(num_epochs):
     # Training
@@ -176,6 +181,8 @@ for epoch in range(num_epochs):
     # Validation
     model.eval()
     val_loss = 0.0
+    val_predictions = []
+    val_references = []
     with torch.no_grad():
         for batch in tqdm(val_loader, desc=f'Validation Epoch {epoch+1}'):
             for k in batch:
@@ -183,6 +190,10 @@ for epoch in range(num_epochs):
             outputs = model(**batch)
             loss = outputs.loss
             val_loss += loss.item() * batch['pixel_values'].size(0)
+            # add other metrics
+            generated_captions = tokenizer.batch_decode(outputs.logits[:, -1, :].argmax(-1, keepdim=True), skip_special_tokens=True)
+            val_predictions.extend(generated_captions)
+            val_references.extend([ex['sentence'] for ex in batch['labels'].cpu().numpy()])
     val_loss /= len(val_loader.dataset)
     print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
@@ -191,6 +202,12 @@ for epoch in range(num_epochs):
         best_val_loss = val_loss
         torch.save(model.state_dict(), save_path)
         print(f"Best model saved at epoch {epoch+1} with val loss {val_loss:.4f}")
+
+    # BLEU expects references as list of lists of tokens
+    bleu_score = bleu_metric.compute(predictions=val_predictions, references=[[ref] for ref in val_references])['bleu']
+    # CIDEr expects references as list of lists of strings
+    cider_score = cider_metric.compute(predictions=val_predictions, references=[[ref] for ref in val_references])['cider']
+    print(f"Validation BLEU: {bleu_score:.4f}, CIDEr: {cider_score:.4f}")
 
 # Load the best model for testing
 if os.path.exists(save_path):
@@ -210,7 +227,8 @@ with torch.no_grad():
         vision_embeds = model.proj(vision_outputs)
         input_ids = torch.full((pixel_values.size(0), 1), tokenizer.bos_token_id, dtype=torch.long, device=device)
         generated = input_ids
-        for _ in range(32):
+        # during inference, the next token is generated based on the tokens generated so fa, so it's a causal masking!
+        for _ in range(32): 
             inputs_embeds = model.decoder.embed_tokens(generated)
             inputs_embeds = torch.cat([vision_embeds.unsqueeze(1), inputs_embeds], dim=1)
             outputs = model.decoder(inputs_embeds=inputs_embeds)
@@ -225,3 +243,13 @@ with torch.no_grad():
     print("Sample generated captions:")
     for i in range(3):
         print(f"Generated: {all_captions[i]}")
+
+# Prepare references for metrics
+# If you have only one reference per image:
+references = [[ref] for ref in all_refs]  # BLEU/CIDEr expect list of lists
+# Compute BLEU
+bleu_score = bleu_metric.compute(predictions=all_captions, references=references)['bleu']
+# Compute CIDEr
+cider_score = cider_metric.compute(predictions=all_captions, references=references)['cider']
+print(f"Test BLEU: {bleu_score:.4f}")
+print(f"Test CIDEr: {cider_score:.4f}")

@@ -9,16 +9,41 @@ import os
 
 # 1. Load the Flickr30k dataset from Hugging Face
 ds = load_dataset("nlphuji/flickr30k")
-# try to check the number of samples in train/val/test
-from collections import Counter
-split_counts = Counter(ds['test']['split'])
-print(split_counts)  # train/val/test: 29000/1014/1000
+# # try to check the number of samples in train/val/test
+# from collections import Counter
+# split_counts = Counter(ds['test']['split'])
+# print(split_counts)  # train/val/test: 29000/1014/1000
 
+# because now for each row we have one image and 5 captions, we want to flatten it to 5 rows/pairs of image+caption
+def flatten_dataset(batch):
+    images = []
+    captions = []
+    splits = []
+    sentids = []
+    img_ids = []
+    filenames = []
+    for img,caps,spl,sids,img_id,fname in tqdm(zip(
+        batch['image'], batch['caption'], batch['split'], batch['sentids'], batch['img_id'], batch['filename']
+        )):
+        for cap,sid in zip(caps,sids):
+            images.append(img)
+            captions.append(cap)
+            splits.append(spl)
+            sentids.append(sid)
+            img_ids.append(img_id)
+            filenames.append(fname)
+    return {
+        'image':images, 'caption':captions,'sentids': sentids,
+        'split': splits, 'img_id': img_ids, 'filename': filenames
+        }
+
+flat_ds = ds['test'].map(flatten_dataset, batched=True)
+    
 
 # 2. Split the dataset into train:val:test according to the pre-defined column of 'split' in the huggingface dataset
-train_ds = ds['test'].filter(lambda d: d['split']=='train')
-val_ds = ds['test'].filter(lambda d: d['split']=='val')
-test_ds = ds['test'].filter(lambda d: d['split']=='test')
+train_ds = flat_ds.filter(lambda d: d['split']=='train')
+val_ds = flat_ds.filter(lambda d: d['split']=='val')
+test_ds = flat_ds.filter(lambda d: d['split']=='test')
 
 
 # 3. Load CLIP's vision encoder and processor
@@ -60,7 +85,8 @@ class MultimodalCaptionModel(nn.Module):
         self.proj = nn.Linear(vision_feature_dim, decoder_embed_dim)
     def forward(self, pixel_values, input_ids, attention_mask=None, labels=None):
         # Extract vision features
-        vision_outputs = self.vision_encoder(pixel_values)[0][:, 0, :]  # CLS token
+        vision_outputs = self.vision_encoder(pixel_values)[0][:, 0, :]  # only use the CLS token (the 1st embedding) as the input for the decoder; 
+        # CLS contains the representaion of the whole image
         vision_embeds = self.proj(vision_outputs)
         # Use vision_embeds as prefix for decoder
         # Concatenate vision_embeds to input embeddings

@@ -6,12 +6,14 @@ from transformers import CLIPProcessor, CLIPModel, AutoModelForCausalLM, AutoTok
 from tqdm import tqdm
 import os
 
+
 # 1. Load the Flickr30k dataset from Hugging Face
 ds = load_dataset("nlphuji/flickr30k")
 # try to check the number of samples in train/val/test
 from collections import Counter
 split_counts = Counter(ds['test']['split'])
 print(split_counts)  # train/val/test: 29000/1014/1000
+
 
 # 2. Split the dataset into train:val:test according to the pre-defined column of 'split' in the huggingface dataset
 train_ds = ds['test'].filter(lambda d: d['split']=='train')
@@ -20,28 +22,34 @@ test_ds = ds['test'].filter(lambda d: d['split']=='test')
 
 
 # 3. Load CLIP's vision encoder and processor
-clip_model = CLIPModel.from_pretrained('openai/clip-vit-base-patch32')
-clip_processor = CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')
+clip_model = CLIPModel.from_pretrained('openai/clip-vit-base-patch32') # the neural net itself and the forward model; 
+# CLIP is essentially a two-tower mnultimodal encoder, has no decoder, to compare the similarity (contrastive learning) between the image and text representations
+# # to see what's inside of the model
+# print(vision_encoder)
+clip_processor = CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32') # the pre-processing methods for images and text
 vision_encoder = clip_model.vision_model
 for param in vision_encoder.parameters():
     param.requires_grad = False  # freeze vision encoder
 
+
 # 4. Load QWen's decoder and tokenizer
-qwen_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base")
+qwen_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base") # QWen is a generative model, same as GPT, so it only has decoder no encoder, the entire model is a decoder
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base")
 decoder = qwen_model.model
 for param in decoder.parameters():
     param.requires_grad = True  # train decoder
 
-# 5. Define a projection layer to map vision features to decoder input
+
+# 5. Define a projection layer to map vision features to decoder input; make sure encoder output and decoder input are in the same space before glue them together 
 def get_vision_feature_dim():
     dummy = torch.zeros(1, 3, 224, 224)
     with torch.no_grad():
         features = vision_encoder(dummy)
-    return features[0].shape[-1]
+    return features[0].shape[-1] # get the last dimension: the size of the feature space
 
 vision_feature_dim = get_vision_feature_dim()
 decoder_embed_dim = decoder.embed_tokens.embedding_dim
+
 
 class MultimodalCaptionModel(nn.Module):
     def __init__(self, vision_encoder, decoder, vision_feature_dim, decoder_embed_dim):
@@ -68,6 +76,7 @@ class MultimodalCaptionModel(nn.Module):
         outputs = self.decoder(inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels)
         return outputs
 
+
 # 6. Preprocessing function for dataset
 def preprocess(example):
     # Preprocess image
@@ -87,10 +96,12 @@ def preprocess(example):
         'labels': labels
     }
 
+
 # 7. Apply preprocessing to datasets
 train_ds = train_ds.map(preprocess)
 val_ds = val_ds.map(preprocess)
 test_ds = test_ds.map(preprocess)
+
 
 # 8. DataLoader
 batch_size = 8
@@ -107,6 +118,7 @@ val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MultimodalCaptionModel(vision_encoder, decoder, vision_feature_dim, decoder_embed_dim).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
 
 # 9. Training and validation loops with model saving/loading
 num_epochs = 5  # You can increase this for better results
@@ -181,5 +193,3 @@ with torch.no_grad():
     print("Sample generated captions:")
     for i in range(3):
         print(f"Generated: {all_captions[i]}")
-# You can add BLEU or other metrics for evaluation if desired.
-# The script now supports real training, validation, test, and model saving/loading, while remaining simple and well-commented for learning. 

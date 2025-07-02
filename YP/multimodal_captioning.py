@@ -77,12 +77,14 @@ decoder_embed_dim = decoder.embed_tokens.embedding_dim
 
 
 class MultimodalCaptionModel(nn.Module):
+    # define the architecture of this neural net, sets up the layers and parameters
     def __init__(self, vision_encoder, decoder, vision_feature_dim, decoder_embed_dim):
         super().__init__()
         self.vision_encoder = vision_encoder
         self.decoder = decoder
         # Project vision features to decoder's embedding space
         self.proj = nn.Linear(vision_feature_dim, decoder_embed_dim)
+    # defines the computations performed at every call, how information flows through the model
     def forward(self, pixel_values, input_ids, attention_mask=None, labels=None):
         # Extract vision features
         vision_outputs = self.vision_encoder(pixel_values)[0][:, 0, :]  # only use the CLS token (the 1st embedding) as the input for the decoder; 
@@ -108,6 +110,8 @@ def preprocess(example):
     # Preprocess image
     image = example['image']
     processed = clip_processor(images=image, return_tensors="pt")
+    # check out what are there in the processed tensor
+    # print(processed.keys())
     pixel_values = processed['pixel_values'][0]
     # Preprocess text
     caption = example['caption']
@@ -160,13 +164,14 @@ for epoch in range(num_epochs):
     for batch in tqdm(train_loader, desc=f'Training Epoch {epoch+1}'):
         for k in batch:
             batch[k] = batch[k].to(device)
-        outputs = model(**batch)
+        outputs = model(**batch) # ** is unpacking operator for dict, passing each key-value pair as a named argument to the function (that's why you didn't see the explicit input) 
         loss = outputs.loss
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        train_loss += loss.item() * batch['pixel_values'].size(0)
-    train_loss /= len(train_loader.dataset)
+        loss.backward()       # compute gradients and accumulate them in each parameter's .grad attribute
+        optimizer.step()      # update model parameters using gradients
+        optimizer.zero_grad() # clear gradients for the next iteration, so they don't accumulate across batches [by default, Pytorch accumulate gradients]
+        train_loss += loss.item() * batch['pixel_values'].size(0)  # loss.item() returns the averaged loss per sample. so we multiple number of sample to convert it back to the total loss in this batch
+    train_loss /= len(train_loader.dataset) 
+    # it's necessary to first multiple the loss by number of images in the batch, then at the very end, divide by number of all images. Because each batch may have different number of images, especially the last batch
 
     # Validation
     model.eval()
@@ -181,7 +186,7 @@ for epoch in range(num_epochs):
     val_loss /= len(val_loader.dataset)
     print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
-    # Save the best model
+    # Save the best model  -- Smart!
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         torch.save(model.state_dict(), save_path)

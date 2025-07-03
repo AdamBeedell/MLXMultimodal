@@ -6,6 +6,7 @@ from transformers import CLIPProcessor, CLIPModel, AutoModelForCausalLM, AutoTok
 from tqdm import tqdm
 import os
 import evaluate # for BLEU from huggingface
+import gc
 
 
 # 1. Load the Flickr30k dataset from Hugging Face
@@ -15,7 +16,7 @@ ds = load_dataset("nlphuji/flickr30k")
 # split_counts = Counter(ds['test']['split'])
 # print(split_counts)  # train/val/test: 29000/1014/1000
 ### reduce size
-ds = ds['test'].shuffle(seed=42).select(range(500))
+ds = ds['test'].shuffle(seed=42).select(range(1500))
 
 
 
@@ -216,6 +217,13 @@ for epoch in range(num_epochs): # iterates over epochs
     val_loss /= len(val_loader.dataset)
     print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
+    # Print 5 sample predictions and references for debugging
+    print("Sample predictions and references:")
+    for pred, ref in zip(val_predictions[:5], val_references[:5]):
+        print(f"Pred: {pred}")
+        print(f"Ref: {ref}")
+        print("---")
+
     # BLEU expects references as list of lists of tokens
     bleu_score = bleu_metric.compute(predictions=val_predictions, references=[[ref] for ref in val_references])['bleu']
     print(f"Validation BLEU: {bleu_score:.4f}")
@@ -232,6 +240,17 @@ if os.path.exists(save_path):
     print(f"Loaded best model from {save_path}")
 else:
     print("No saved model found, using last epoch model.")
+
+# After dataset preparation, free up the original datasets
+
+del ds
+gc.collect()
+
+# After training and validation, before test evaluation
+
+del train_ds, val_ds, train_ds_1, val_ds_1, train_loader, val_loader
+
+gc.collect()
 
 # 10. Test: generate captions for test images
 model.eval()
@@ -267,3 +286,9 @@ references = [[ref] for ref in all_refs]  # BLEU expect list of lists
 # Compute BLEU
 bleu_score = bleu_metric.compute(predictions=all_captions, references=references)['bleu']
 print(f"Test BLEU: {bleu_score:.4f}")
+
+# After test evaluation, free up test data and model
+
+del test_ds, test_ds_1, flat_ds, model, decoder, vision_encoder, clip_model, qwen_model, tokenizer, clip_processor
+
+gc.collect()

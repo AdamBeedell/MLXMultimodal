@@ -17,7 +17,7 @@ ds = load_dataset("nlphuji/flickr30k")
 # split_counts = Counter(ds['test']['split'])
 # print(split_counts)  # train/val/test: 29000/1014/1000
 ### reduce size
-ds = ds['test'].shuffle(seed=42).select(range(1500))
+ds = ds['test'].shuffle(seed=42).select(range(3000))
 
 
 
@@ -72,6 +72,9 @@ qwen_model.resize_token_embeddings(len(tokenizer))
 decoder = qwen_model
 for param in decoder.parameters():
     param.requires_grad = True  # train decoder
+
+if tokenizer.bos_token_id is None:
+    tokenizer.bos_token_id = tokenizer.eos_token_id  # or another valid token id
 
 
 # 5. Define a projection layer to map vision features to decoder input; make sure encoder output and decoder input are in the same space before glue them together 
@@ -151,7 +154,7 @@ test_ds = test_ds_1.map(preprocess, load_from_cache_file=False)
 
 
 # 8. DataLoader
-batch_size = 64
+batch_size = 32
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     def to_tensor(x):
@@ -175,7 +178,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
 
 # 9. Training and validation loops with model saving/loading
-num_epochs = 5  # You can increase this for better results
+num_epochs = 10  # You can increase this for better results
 save_path = './YP/multimodal_caption_model_small.pt'
 
 best_val_loss = float('inf')
@@ -225,6 +228,7 @@ for epoch in range(num_epochs): # iterates over epochs
                     next_token_logits = outputs.logits[:, -1, :]
                     next_token = next_token_logits.argmax(-1, keepdim=True)
                     generated = torch.cat([generated, next_token], dim=1)
+                print("Generated token IDs:", generated.tolist())
                 caption = tokenizer.batch_decode(generated, skip_special_tokens=True)
                 generated_captions.extend(caption)
             val_predictions.extend(generated_captions)

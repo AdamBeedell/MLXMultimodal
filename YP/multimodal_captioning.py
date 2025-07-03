@@ -5,6 +5,7 @@ from datasets import load_dataset
 from transformers import CLIPProcessor, CLIPModel, AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # ignore warnings from huggingface
 import evaluate # for BLEU from huggingface
 import gc
 
@@ -150,7 +151,7 @@ test_ds = test_ds_1.map(preprocess, load_from_cache_file=False)
 
 
 # 8. DataLoader
-batch_size = 32
+batch_size = 64
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     def to_tensor(x):
@@ -175,7 +176,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
 # 9. Training and validation loops with model saving/loading
 num_epochs = 5  # You can increase this for better results
-save_path = 'multimodal_caption_model_small.pt'
+save_path = './YP/multimodal_caption_model_small.pt'
 
 best_val_loss = float('inf')
 # using more metrics
@@ -210,7 +211,22 @@ for epoch in range(num_epochs): # iterates over epochs
             loss = outputs.loss
             val_loss += loss.item() * batch['pixel_values'].size(0)
             # add other metrics
-            generated_captions = tokenizer.batch_decode(outputs.logits[:, -1, :].argmax(-1, keepdim=True), skip_special_tokens=True)
+            generated_captions = []
+            for i in range(batch['pixel_values'].size(0)):
+                pixel_values = batch['pixel_values'][i].unsqueeze(0)
+                vision_outputs = model.vision_encoder(pixel_values)[0][:, 0, :]
+                vision_embeds = model.proj(vision_outputs)
+                input_ids = torch.full((1, 1), tokenizer.bos_token_id, dtype=torch.long, device=device)
+                generated = input_ids
+                for _ in range(32): 
+                    inputs_embeds = model.decoder.model.embed_tokens(generated)
+                    inputs_embeds = torch.cat([vision_embeds.unsqueeze(1), inputs_embeds], dim=1)
+                    outputs = model.decoder(inputs_embeds=inputs_embeds)
+                    next_token_logits = outputs.logits[:, -1, :]
+                    next_token = next_token_logits.argmax(-1, keepdim=True)
+                    generated = torch.cat([generated, next_token], dim=1)
+                caption = tokenizer.batch_decode(generated, skip_special_tokens=True)
+                generated_captions.extend(caption)
             val_predictions.extend(generated_captions)
             references = tokenizer.batch_decode(batch['labels'], skip_special_tokens=True)
             val_references.extend(references)

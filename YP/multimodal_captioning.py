@@ -17,7 +17,7 @@ ds = load_dataset("nlphuji/flickr30k")
 # split_counts = Counter(ds['test']['split'])
 # print(split_counts)  # train/val/test: 29000/1014/1000
 ### reduce size
-ds = ds['test'].shuffle(seed=42).select(range(3000))
+ds = ds['test'].shuffle(seed=42).select(range(5000))
 
 
 
@@ -71,7 +71,11 @@ tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base") # to tokenize 
 qwen_model.resize_token_embeddings(len(tokenizer))
 decoder = qwen_model
 for param in decoder.parameters():
-    param.requires_grad = True  # train decoder
+    param.requires_grad = False  
+# only fine-tune the last two layers of QWen
+for block in decoder.model.layers[-2:]:
+    for param in block.parameters():
+        param.requires_grad = True
 
 if tokenizer.bos_token_id is None:
     tokenizer.bos_token_id = tokenizer.eos_token_id  # or another valid token id
@@ -176,6 +180,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MultimodalCaptionModel(vision_encoder, decoder, vision_feature_dim, decoder_embed_dim).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
+# train/fine-tune the projection layer (project from the visual space to the text space)
+for param in model.proj.parameters():
+    param.requires_grad = True
 
 # 9. Training and validation loops with model saving/loading
 num_epochs = 10  # You can increase this for better results
@@ -228,7 +235,6 @@ for epoch in range(num_epochs): # iterates over epochs
                     next_token_logits = outputs.logits[:, -1, :]
                     next_token = next_token_logits.argmax(-1, keepdim=True)
                     generated = torch.cat([generated, next_token], dim=1)
-                print("Generated token IDs:", generated.tolist())
                 caption = tokenizer.batch_decode(generated, skip_special_tokens=True)
                 generated_captions.extend(caption)
             val_predictions.extend(generated_captions)
@@ -239,7 +245,7 @@ for epoch in range(num_epochs): # iterates over epochs
 
     # Print 5 sample predictions and references for debugging
     print("Sample predictions and references:")
-    for pred, ref in zip(val_predictions[:5], val_references[:5]):
+    for pred, ref in zip(val_predictions[:10], val_references[:10]):
         print(f"Pred: {pred}")
         print(f"Ref: {ref}")
         print("---")

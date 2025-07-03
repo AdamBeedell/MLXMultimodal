@@ -149,7 +149,7 @@ test_ds = test_ds_1.map(preprocess, load_from_cache_file=False)
 
 
 # 8. DataLoader
-batch_size = 16
+batch_size = 32
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     def to_tensor(x):
@@ -163,9 +163,9 @@ def collate_fn(batch):
         'labels': torch.stack([to_tensor(x['labels']) for x in batch]),
     }
 # shuffle samples for training to aviod model learn the order of samples, which is useless
-train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,num_workers=4, pin_memory=True)
 # not shuffle samples to ensure the same validation dataset for each epoch, to make the comparison between epochs fair
-val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,num_workers=4, pin_memory=True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MultimodalCaptionModel(vision_encoder, decoder, vision_feature_dim, decoder_embed_dim).to(device)
@@ -211,11 +211,13 @@ for epoch in range(num_epochs): # iterates over epochs
             # add other metrics
             generated_captions = tokenizer.batch_decode(outputs.logits[:, -1, :].argmax(-1, keepdim=True), skip_special_tokens=True)
             val_predictions.extend(generated_captions)
+            references = tokenizer.batch_decode(batch['labels'], skip_special_tokens=True)
+            val_references.extend(references)
     val_loss /= len(val_loader.dataset)
     print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
     # BLEU expects references as list of lists of tokens
-    bleu_score = bleu_metric.compute(predictions=val_predictions, references=[[ref[0]] for ref in val_references])['bleu']
+    bleu_score = bleu_metric.compute(predictions=val_predictions, references=[[ref] for ref in val_references])['bleu']
     print(f"Validation BLEU: {bleu_score:.4f}")
 
     # Save the best model  -- Smart!

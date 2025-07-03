@@ -65,14 +65,16 @@ for param in vision_encoder.parameters():
 # 4. Load QWen's decoder and tokenizer
 qwen_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base") # QWen is a generative model, same as GPT, so it only has decoder no encoder, the entire model is a decoder
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base") # to tokenize the captions/text
-decoder = qwen_model.model
+# resize the tokenizer to make sure the dimension matches
+qwen_model.resize_token_embeddings(len(tokenizer))
+decoder = qwen_model
 for param in decoder.parameters():
     param.requires_grad = True  # train decoder
 
 
 # 5. Define a projection layer to map vision features to decoder input; make sure encoder output and decoder input are in the same space before glue them together 
 vision_feature_dim = vision_encoder.config.hidden_size
-decoder_embed_dim = decoder.embed_tokens.embedding_dim
+decoder_embed_dim = decoder.model.embed_tokens.embedding_dim
 ### build the architecture
 class MultimodalCaptionModel(nn.Module):
     # define the architecture of this neural net, sets up the layers and parameters
@@ -90,7 +92,7 @@ class MultimodalCaptionModel(nn.Module):
         vision_embeds = self.proj(vision_outputs)
         # Use vision_embeds as prefix for decoder
         # Concatenate vision_embeds to input embeddings
-        inputs_embeds = self.decoder.embed_tokens(input_ids)
+        inputs_embeds = self.decoder.model.embed_tokens(input_ids)
         # Prepend vision_embeds to the sequence
         vision_embeds = vision_embeds.unsqueeze(1)  # (batch, 1, embed_dim)
         inputs_embeds = torch.cat([vision_embeds, inputs_embeds], dim=1) # the vision feature (CLS token) is prepended to the text embeddings
@@ -242,7 +244,7 @@ with torch.no_grad():
         generated = input_ids
         # during inference, the next token is generated based on the tokens generated so fa, so it's a causal masking!
         for _ in range(32): 
-            inputs_embeds = model.decoder.embed_tokens(generated)
+            inputs_embeds = model.decoder.model.embed_tokens(generated)
             inputs_embeds = torch.cat([vision_embeds.unsqueeze(1), inputs_embeds], dim=1)
             outputs = model.decoder(inputs_embeds=inputs_embeds)
             next_token_logits = outputs.logits[:, -1, :]

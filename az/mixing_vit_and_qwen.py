@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
-from transformers import ViTModel, BertModel, BertTokenizer 
+from torchmetrics.classification import MulticlassAccuracy
+from transformers import ViTModel, BertModel, BertTokenizer
 
 import pathlib 
 pathlib.Path('temp').mkdir(parents=True, exist_ok=True)
@@ -16,17 +17,15 @@ torch.cuda.manual_seed_all(5678)
 
 ### use an existing encoder for the images
 vit_model = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
-vit_model.to(device)
 vit_model.eval()
 bert_model = BertModel.from_pretrained('bert-base-uncased')
-bert_model.to(device)
 bert_model.eval()
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 bert_vals = [v for k, v in tokenizer.vocab.items() if v not in [101,0]]
 bert_vals_rev = {v: i for i, v in enumerate(bert_vals)}
 
 ## load data and split
-grid = torch.load("data/grid_flikr30k.pt", weights_only=True)
+grid = torch.load("data/grid_flikr30k.pt", weights_only=True)[:500]
 image_data = torch.load("data/images_flikr30k.pt", weights_only=True)
 text_data = torch.load("data/text_flikr30k.pt", weights_only=True)  
 
@@ -39,6 +38,11 @@ for r, row in enumerate(target):
 target = torch.tensor(target)    
 
 # model
+# decoder from Qwen
+
+
+
+
 class Attention(nn.Module):
     def __init__(self,  vk_i_dim, q_i_dim, kq_dim):
         super().__init__()
@@ -88,7 +92,7 @@ class AddViTEncoding(nn.Module):
        super().__init__()
        
     def forward(self, images): 
-        with torch.no_grad(): 
+        with torch.no_grad():
             im = vit_model(images).last_hidden_state
         return im
 
@@ -121,9 +125,9 @@ class LongDecode(nn.Module):
     def forward(self, image, text, pad_token=0):
         im = self.im_start(image) + self.pos_embedding(self.pos)
         tx = self.tx_start(text) + self.rpos_embedding(self.rpos)
-        x = torch.cat([im, tx], dim=1).to(device)
-        key_mask = torch.cat([torch.full((im.shape[0], im.shape[1]), False).to(device), 
-                              text==pad_token], dim=1).to(device) 
+        x = torch.cat([im, tx], dim=1)
+        key_mask = torch.cat([torch.full((im.shape[0], im.shape[1]), False), 
+                              text==pad_token], dim=1) 
         for i, de in enumerate(self.decoders):
             x = de(x, causal_mask = self.causal_mask, key_mask = key_mask)
         return self.fc_final(x[:,im.shape[1]:-1,:])
@@ -131,8 +135,8 @@ class LongDecode(nn.Module):
 
 # ### start test
 # model = LongDecode(im_dim = 768, tx_dim = 768 , hidden_dim = 1024, 
-#                     seq_len = 197, rseq_len = 60, vocab_len = 30522, kq_dim = 512)
-# x = model(image_data[:3], text_data[:3])
+#                    seq_len = 197, rseq_len = 88, vocab_len = 30522, kq_dim = 512)
+# x = model(images[:3], text[:3])
 # y = target[:3]
 # criterion = nn.CrossEntropyLoss(ignore_index=-100)
 # criterion(x.transpose(2,1), y)
@@ -167,31 +171,27 @@ def make(config):
 def train(model, train_loader, criterion, optimizer, config):  
     model = model.to(config['device'], non_blocking=True)
     model.train()
-    tr_losses = []
     print(f"Model's device: {next(model.parameters()).device}")
     for epoch in range(config['num_epochs']):
-        losses = []
-        for i, gr in enumerate(train_loader):          
+        losses = 0
+        for gr in train_loader:          
             im = image_data[gr[:,0]].to(config['device'], non_blocking=True)
             tx = text_data[gr[:,1]].to(config['device'], non_blocking=True)
-            lab = target[gr[:,1]].to(config['device'], non_blocking=True)
-            
-            optimizer.zero_grad()
-            p = model(im, tx)
-            loss = criterion(p.transpose(2,1), lab)
-            loss.backward()
-            optimizer.step()
-            losses.append(loss)
-            if i % 100 == 0:
-                tr_losses.append(loss)
-        torch.save(model.state_dict(), "temp/model_state.pt")
-        mean_loss = sum(losses)/len(train_loader)
-        print(f'Epoch {epoch+1}, Loss: {mean_loss.item():.4f}')
-    torch.save(torch.tensor(tr_losses), "temp/train_losses.pt")
+            lab = target[gr[:,1]].to(config['device'], non_blocking=True) 
+            with torch.autocast(config['device']):
+                optimizer.zero_grad()
+                p = model(im, tx)
+                loss = criterion(p.transpose(2,1), lab)
+                loss.backward()
+                optimizer.step()
+                losses += loss
+        mean_loss = losses/len(train_loader)
+        print(f'Epoch {epoch+1}, Loss: {mean_loss.item():.4f}') 
  
 def test(model, test_loader, criterion):
-    model.eval() 
-    losses = []
+    model.eval()
+    mca = MulticlassAccuracy(num_classes=30522)
+    losses = 0
     for gr in test_loader:  
         with torch.no_grad():
             im = image_data[gr[:,0]].to(config['device'], non_blocking=True)
@@ -199,16 +199,17 @@ def test(model, test_loader, criterion):
             lab = target[gr[:,1]].to(config['device'], non_blocking=True)
             p = model(im, tx)
             loss = criterion(p.transpose(2,1), lab)
-            losses.append(loss) 
-    mean_loss = sum(losses)/len(test_loader)
-    print(f'Average test loss, Loss: {mean_loss.item():.4f}')
-    torch.save(torch.tensor(losses), "temp/test_losses.pt") 
-    
+            losses += loss
+            mca.update(p, lab) 
+    mean_loss = losses/len(test_loader)
+    print(f'Average test loss, Loss: {mean_loss.item():.4f}') 
+    print("Accuracy:", mca.compute().item()) 
+
 config = dict(
-    num_epochs=20,
+    num_epochs=10,
     batch_size=8,
     learning_rate=0.01,
-    hidden_dim = 512, 
+    hidden_dim = 256, 
     kq_dim = 20, 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     )
@@ -218,5 +219,6 @@ model, train_loader, test_loader, criterion, optimizer = make(config)
 print(model)
 train(model, train_loader, criterion, optimizer, config)
 
+torch.save(model.state_dict(), "temp/model_state.pt")
 #### load model
 test(model, test_loader, criterion) 

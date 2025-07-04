@@ -15,6 +15,8 @@ Relevant Cortex entry: [Multimodal transformers and image captioning](https://co
 4. Train and experiment with datasets and alignment
 5. Use [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) pre-trained as decoder
 
+I also asked o3 to [expand on the above](https://chatgpt.com/share/68657063-a65c-8009-9eba-3c3f2f11e721). 
+
 
 ## Script kids
 

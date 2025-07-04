@@ -16,7 +16,8 @@ dependencies = [
   "wandb>=0.20.1",
   "torchvision>=0.22.1",
   "transformers>=4.53.0",
-  "evaluate>=0.4.4"
+  "evaluate>=0.4.4",
+  "accelerate>=1.8.1",
 ]
 
 # see https://docs.astral.sh/uv/concepts/projects/workspaces/

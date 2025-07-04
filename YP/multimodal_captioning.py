@@ -17,7 +17,7 @@ ds = load_dataset("nlphuji/flickr30k")
 # split_counts = Counter(ds['test']['split'])
 # print(split_counts)  # train/val/test: 29000/1014/1000
 ### reduce size
-ds = ds['test'].shuffle(seed=42).select(range(5000))
+ds = ds['test'].shuffle(seed=42).select(range(500))
 
 
 
@@ -48,9 +48,9 @@ flat_ds = ds.map(flatten_dataset, batched=True)
     
 
 # 2. Split the dataset into train:val:test according to the pre-defined column of 'split' in the huggingface dataset
-train_ds_1 = flat_ds.filter(lambda d: d['split']=='train')
-val_ds_1 = flat_ds.filter(lambda d: d['split']=='val')
-test_ds_1 = flat_ds.filter(lambda d: d['split']=='test')
+train_ds_1 = flat_ds.filter(lambda d: d['split']=='train', keep_in_memory=True)
+val_ds_1 = flat_ds.filter(lambda d: d['split']=='val', keep_in_memory=True)
+test_ds_1 = flat_ds.filter(lambda d: d['split']=='test', keep_in_memory=True)
 
 
 # 3. Load CLIP's vision encoder and processor
@@ -158,7 +158,7 @@ test_ds = test_ds_1.map(preprocess, load_from_cache_file=False)
 
 
 # 8. DataLoader
-batch_size = 32
+batch_size = 8
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     def to_tensor(x):
@@ -172,9 +172,9 @@ def collate_fn(batch):
         'labels': torch.stack([to_tensor(x['labels']) for x in batch]),
     }
 # shuffle samples for training to aviod model learn the order of samples, which is useless
-train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,num_workers=4, pin_memory=True)
+train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 # not shuffle samples to ensure the same validation dataset for each epoch, to make the comparison between epochs fair
-val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,num_workers=4, pin_memory=True)
+val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = MultimodalCaptionModel(vision_encoder, decoder, vision_feature_dim, decoder_embed_dim).to(device)
@@ -186,7 +186,7 @@ for param in model.proj.parameters():
 
 # 9. Training and validation loops with model saving/loading
 num_epochs = 10  # You can increase this for better results
-save_path = './YP/multimodal_caption_model_small.pt'
+save_path = './multimodal_caption_model_small.pt'
 
 best_val_loss = float('inf')
 # using more metrics
@@ -228,13 +228,19 @@ for epoch in range(num_epochs): # iterates over epochs
                 vision_embeds = model.proj(vision_outputs)
                 input_ids = torch.full((1, 1), tokenizer.bos_token_id, dtype=torch.long, device=device)
                 generated = input_ids
-                for _ in range(32): 
+                # Prepend vision_embeds ONCE
+                vision_embeds_exp = vision_embeds.unsqueeze(1)
+                finished = torch.zeros((1,), dtype=torch.bool, device=device)
+                for _ in range(32):
                     inputs_embeds = model.decoder.model.embed_tokens(generated)
-                    inputs_embeds = torch.cat([vision_embeds.unsqueeze(1), inputs_embeds], dim=1)
+                    inputs_embeds = torch.cat([vision_embeds_exp, inputs_embeds], dim=1)
                     outputs = model.decoder(inputs_embeds=inputs_embeds)
                     next_token_logits = outputs.logits[:, -1, :]
                     next_token = next_token_logits.argmax(-1, keepdim=True)
                     generated = torch.cat([generated, next_token], dim=1)
+                    # Stop if EOS generated for all
+                    if (next_token == tokenizer.eos_token_id).all():
+                        break
                 caption = tokenizer.batch_decode(generated, skip_special_tokens=True)
                 generated_captions.extend(caption)
             val_predictions.extend(generated_captions)
@@ -289,18 +295,24 @@ with torch.no_grad():
         vision_embeds = model.proj(vision_outputs)
         input_ids = torch.full((pixel_values.size(0), 1), tokenizer.bos_token_id, dtype=torch.long, device=device)
         generated = input_ids
-        # during inference, the next token is generated based on the tokens generated so fa, so it's a causal masking!
-        for _ in range(32): 
+        vision_embeds_exp = vision_embeds.unsqueeze(1)
+        finished = torch.zeros((pixel_values.size(0),), dtype=torch.bool, device=device)
+        for _ in range(32):
             inputs_embeds = model.decoder.model.embed_tokens(generated)
-            inputs_embeds = torch.cat([vision_embeds.unsqueeze(1), inputs_embeds], dim=1)
+            inputs_embeds = torch.cat([vision_embeds_exp, inputs_embeds], dim=1)
             outputs = model.decoder(inputs_embeds=inputs_embeds)
             next_token_logits = outputs.logits[:, -1, :]
             next_token = next_token_logits.argmax(-1, keepdim=True)
             generated = torch.cat([generated, next_token], dim=1)
+            # Stop if EOS generated for all
+            finished |= (next_token.squeeze(1) == tokenizer.eos_token_id)
+            if finished.all():
+                break
         captions = tokenizer.batch_decode(generated, skip_special_tokens=True)
         all_captions.extend(captions)
-        # Reference captions for evaluation
-        all_refs.extend([ex['sentence'] for ex in batch['labels'].cpu().numpy()])
+        # Reference captions for evaluation (decode batch['labels'])
+        references = tokenizer.batch_decode(batch['labels'], skip_special_tokens=True)
+        all_refs.extend(references)
     # Print a few generated captions
     print("Sample generated captions:")
     for i in range(3):

@@ -159,7 +159,7 @@ test_ds = test_ds_1.map(preprocess, load_from_cache_file=False)
 
 
 # 8. DataLoader
-batch_size = 96
+batch_size = 32
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     def to_tensor(x):
@@ -253,11 +253,11 @@ for epoch in range(num_epochs): # iterates over epochs
 
     # Print 5 sample predictions and references for debugging
     print("==================Sample predictions and references:====================")
-    pairs = list(zip(val_predictions, val_references))
-    for pred, ref in random.sample(pairs, k = 5):
+    for pred, ref in zip(val_predictions[0:26:5], val_references[0:26:5]):
         print(f"Predicted caption: {pred}")
         print(f"Reference caption: {ref}")
         print("----------------------------------")
+
 
     # BLEU expects references as list of lists of tokens
     bleu_score = bleu_metric.compute(predictions=val_predictions, references=[[ref] for ref in val_references])['bleu']

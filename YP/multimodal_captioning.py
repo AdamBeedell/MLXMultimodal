@@ -8,6 +8,7 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"  # ignore warnings from huggingface
 import evaluate # for BLEU from huggingface
 import gc
+import random
 
 
 # 1. Load the Flickr30k dataset from Hugging Face
@@ -17,7 +18,7 @@ ds = load_dataset("nlphuji/flickr30k")
 # split_counts = Counter(ds['test']['split'])
 # print(split_counts)  # train/val/test: 29000/1014/1000
 ### reduce size
-ds = ds['test'].shuffle(seed=42).select(range(500))
+ds = ds['test'].shuffle(seed=42).select(range(2000))
 
 
 
@@ -158,7 +159,7 @@ test_ds = test_ds_1.map(preprocess, load_from_cache_file=False)
 
 
 # 8. DataLoader
-batch_size = 8
+batch_size = 96
 # convert a list of individual tensors into a single batched tensor; add the stack axis as the first dimension
 def collate_fn(batch):
     def to_tensor(x):
@@ -236,7 +237,8 @@ for epoch in range(num_epochs): # iterates over epochs
                     inputs_embeds = torch.cat([vision_embeds_exp, inputs_embeds], dim=1)
                     outputs = model.decoder(inputs_embeds=inputs_embeds)
                     next_token_logits = outputs.logits[:, -1, :]
-                    next_token = next_token_logits.argmax(-1, keepdim=True)
+                    # select one of the top 5 predictions to aviod stuck/repeat the top one (greedy decoding)
+                    next_token = torch.topk(next_token_logits, k=5, dim=-1).indices[:, torch.randint(0, 5, (1,)).item()].unsqueeze(1)
                     generated = torch.cat([generated, next_token], dim=1)
                     # Stop if EOS generated for all
                     if (next_token == tokenizer.eos_token_id).all():
@@ -250,11 +252,12 @@ for epoch in range(num_epochs): # iterates over epochs
     print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
     # Print 5 sample predictions and references for debugging
-    print("Sample predictions and references:")
-    for pred, ref in zip(val_predictions[:10], val_references[:10]):
-        print(f"Pred: {pred}")
-        print(f"Ref: {ref}")
-        print("---")
+    print("==================Sample predictions and references:====================")
+    pairs = list(zip(val_predictions, val_references))
+    for pred, ref in random.sample(pairs, k = 5):
+        print(f"Predicted caption: {pred}")
+        print(f"Reference caption: {ref}")
+        print("----------------------------------")
 
     # BLEU expects references as list of lists of tokens
     bleu_score = bleu_metric.compute(predictions=val_predictions, references=[[ref] for ref in val_references])['bleu']
@@ -302,7 +305,8 @@ with torch.no_grad():
             inputs_embeds = torch.cat([vision_embeds_exp, inputs_embeds], dim=1)
             outputs = model.decoder(inputs_embeds=inputs_embeds)
             next_token_logits = outputs.logits[:, -1, :]
-            next_token = next_token_logits.argmax(-1, keepdim=True)
+            # select one of the top 5 predictions to aviod stuck/repeat the top one (greedy decoding)
+            next_token = torch.topk(next_token_logits, k=5, dim=-1).indices[:, torch.randint(0, 5, (1,)).item()].unsqueeze(1)
             generated = torch.cat([generated, next_token], dim=1)
             # Stop if EOS generated for all
             finished |= (next_token.squeeze(1) == tokenizer.eos_token_id)
